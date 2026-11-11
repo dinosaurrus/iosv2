@@ -49,6 +49,13 @@ static SweetSurface *sweet_surface_copy(uint32_t id) {
 }
 static uint32_t get32(const uint8_t *p,unsigned off){uint32_t v;memcpy(&v,p+off,4);return v;}
 static uint64_t sweet_fb_swap_count;
+static uint64_t sweet_touch_down_at;
+static unsigned sweet_touch_latency_logged;
+static uint64_t mock_time;
+static uint64_t mach_absolute_time(void) { return ++mock_time; }
+static void absolutetime_to_nanoseconds(uint64_t delta, uint64_t *ns) {
+    *ns = delta;
+}
 struct AppleCLCD {
  int fLock=0;bool fDirty=false,fPowerOff=false,fPresentReady=false,ready=true;
  uint32_t fSwapID=0,fMissed=0;unsigned presents=0;
@@ -64,9 +71,11 @@ int main(){
  AppleCLCD fb;uint8_t rec[SWEET_FB_SWAP_REC_SIZE]={};uint32_t id=1;
  memcpy(rec+0x54,&id,4);table[1]=&surface;
  fb.swap(rec);assert(fb.fDirty && surface.refs==2);
+ assert(sweet_fb_swap_count == 1);
  table[1]=nullptr; // user's reference/ID lookup may disappear before the timer
  fb.ready=false;tick(fb);assert(fb.fDirty && surface.refs==2 && fb.presents==1);
  uint8_t other[SWEET_FB_SWAP_REC_SIZE]={};fb.swap(other); // timeout cannot replace pending refs
+ assert(sweet_fb_swap_count == 1);
  assert(fb.fPendingSurfaces[0]==&surface && surface.refs==2);
  fb.ready=true;tick(fb);assert(!fb.fDirty && surface.refs==1 && fb.presents==2);
  table[1]=&surface;fb.swap(rec);fb.fPowerOff=true;tick(fb);

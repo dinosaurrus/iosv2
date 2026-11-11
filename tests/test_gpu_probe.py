@@ -96,8 +96,8 @@ class GPUProbeTests(unittest.TestCase):
 #include <stdbool.h>
 #include <stdio.h>
 typedef uintptr_t vm_offset_t;
-static int scenario, waits;
-static void touch_wait(unsigned ms) { waits+=ms; }
+static int scenario;
+static void touch_wait(unsigned ms) { (void)ms; }
 static uint32_t touch_rd(vm_offset_t base, uint32_t off) {
  if(base==1) {
   if(off==0x2018) return scenario==1 ? 33 : 34;
@@ -111,13 +111,15 @@ static uint32_t touch_rd(vm_offset_t base, uint32_t off) {
  return 0;
 }
 '''
-        suffix='\nint run(int mode) {scenario=mode;waits=0;return spes_gpu_retire(1,2,0x8000,34,"mock") ? 1 : 0;}\n'
+        suffix='\nint run(int mode) {scenario=mode;return spes_gpu_retire(1,2,0x8000,34,"mock") ? 1 : 0;}\n'
         with tempfile.TemporaryDirectory() as d:
             c=Path(d)/'retire.c';lib=Path(d)/'retire.dylib';c.write_text(prefix+helper+suffix)
             subprocess.run(['clang','-shared','-fPIC','-Wall','-Wextra','-Werror',str(c),'-o',str(lib)],check=True,capture_output=True)
             dll=ctypes.CDLL(str(lib));dll.run.argtypes=[ctypes.c_int]
-            self.assertEqual(dll.run(0),1) # FSR format bit alone is not a fault
-            for fault in range(1,7):self.assertEqual(dll.run(fault),0,fault)
+            self.assertEqual(dll.run(0), 1)
+            self.assertEqual(dll.run(1), 0)
+            for fault in range(2, 7):
+                self.assertEqual(dll.run(fault), 0, fault)
 
     def test_indirect_submission_and_fence_layout(self):
         buf=(ctypes.c_uint32*2048)(); count=self.lib.packets(buf)
