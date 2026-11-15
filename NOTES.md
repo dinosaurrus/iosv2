@@ -1,3 +1,43 @@
+# 0170–0172 upstream HackiOS adaptations; new boot images, 2026-11-15
+
+- Reviewed all five requested repositories (`JopangJovan/hackios-xnu-kernel-umi`,
+  `JopangJovan/hackios-xnu-userland-umi`, `oosexgang/hakios-uefi`,
+  `oosexgang/hakios-xnu-kernel`, `oosexgang/hakios-metal`). Analysis and the
+  reasons for what was not portable are in `docs/SPES-UPSTREAM-ADAPT.md`.
+- Added 0170 (HackiOS `80f5042`): `RedwoodWLAN` is an `IONetworkController` ->
+  `IOEthernetController` -> `IO80211Controller`, and the radio address is set as
+  `local-mac-address` on the device-tree `wlan` node, so MobileGestalt stops
+  waiting up to 5 s per lookup (a full LaunchServices rebuild on first boot took
+  hours). spes's `wlan` node is under `arm-io` and has no nub, so the property is
+  set on the device-tree entry and the controller stays under the platform; a
+  tree whose node is a published nub (HackiOS) gets the controller under it.
+- Added 0171 (HackiOS `7822f30` GPU half): `millisecondsUntil()` overflow checks,
+  `freeBuffer()` empties the handle before dropping `gGPULock` (double close),
+  never-issued fences refused with `kIOReturnBadArgument`, and the submission log
+  no longer reads `addresses[0]`/`words[0]` when `count == 0`. The upstream
+  `show()` size check does not apply (this port's `show()` is unsupported).
+- Added 0172 (HackiOS `7822f30` display half): a surface plane's default size is
+  computed in 64 bits and bounded; `directPresent()` requires the rows it shows
+  to fit the surface's own memory or falls back to the copying path.
+- Commit 2373dd8, pushed to origin/spes. CI run 43709443720 success; kernel
+  `xnu/out/kernel.development.sweet` =
+  `ab9b37eb4a6a9325c77188858ff5754ce1f06fab871a44e9500ee2bf40813e6f`
+  (previous `dd51672a…` kept at `/tmp/opencode/kernel-dd51672.bak`).
+- `rebuild.sh` regenerated and verified both images (verify-boot-image PASS,
+  same cmdlines and ADT):
+  `boot-spes-hackios.img` = `boot-spes-hackios-wifi.img` =
+  `d2b949332100c8b1a3338d53b8edebe2b0cd8b720aa2dde5d0bd2b6a0daa67ee`;
+  `boot-spes-hackios-safe.img` =
+  `71eaf98c3525ed75e3c447aeca0cc6368eca9fdc227c04963bb5d8f3da508b80`.
+- Root image unchanged (`Yeni Klasör/spes-ios-root-fixed.simg`, sparse
+  `c7e6d11a…`, raw `67599870…`); do not reflash without new evidence.
+- No phone was attached (fastboot/adb empty), so 0170's runtime effect (no
+  MobileGestalt stalls, `local-mac-address` on the node) and 0171/0172 are not
+  hardware-tested. Next: `fastboot boot boot-spes-hackios.img`; check the log
+  for one `RedwoodWLAN:` line and the usual `SPES WIFI` / `WLAN FIRMWARE READY`
+  lines. If Wi-Fi fails, boot `boot-spes-hackios-safe.img` and pull a log with
+  `tools/sweet-log-pull.sh`.
+
 # 0169 Wi-Fi length checks; new boot images, 2026-11-15
 
 - Starting point: the delivered 2026-11-14 image already contained 0099/0103/0110/0113/0115

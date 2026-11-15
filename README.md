@@ -63,7 +63,9 @@ HTT, scan/join and the WPA2 4-way in the kernel), 0110 following Topaz on the
 MSA handover, and 0113 for the iOS side (en0 through the BSD interface KPI and
 Apple80211 answered in the kernel, so wifid drives it); 0169 bounds the lengths
 the modem chooses (SMEM items, GLINK RX messages, QRTR datagrams) as HackiOS's
-79b00afb70 does. It is off unless the image gets
+79b00afb70 does, 0170 makes the controller an IOEthernetController and puts the
+address on the wlan node (HackiOS 80f5042), and 0171/0172 are the portable GPU
+and surface checks from HackiOS 7822f30. It is off unless the image gets
 `SWEET_EXTRA_ARGS='modem=1 wifi=1'`.
 
 `tools/build-spes-ios-graphics.sh KERNEL LIVE_FDT` builds the full graphics image
