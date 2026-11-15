@@ -59,9 +59,12 @@ SM6225 SoC and Adreno 610. Main pieces, all patches in `xnu/patches`:
   instead of copying them on the CPU.
 
 Wi-Fi uses patch 0099 (modem boot through TrustZone PAS, GLINK/QRTR, WLFW, WMI,
-HTT) with 0110 following Topaz on the MSA handover; it is off unless the image
-gets `SWEET_EXTRA_ARGS='modem=1 wifi=1'`. The iOS side (en0 and Apple80211 for
-wifid, Topaz 0900) is not ported yet.
+HTT, scan/join and the WPA2 4-way in the kernel), 0110 following Topaz on the
+MSA handover, and 0113 for the iOS side (en0 through the BSD interface KPI and
+Apple80211 answered in the kernel, so wifid drives it); 0169 bounds the lengths
+the modem chooses (SMEM items, GLINK RX messages, QRTR datagrams) as HackiOS's
+79b00afb70 does. It is off unless the image gets
+`SWEET_EXTRA_ARGS='modem=1 wifi=1'`.
 
 `tools/build-spes-ios-graphics.sh KERNEL LIVE_FDT` builds the full graphics image
 (defaults: `SWEET_CPUS=6`, `SWEET_FB_HZ=60`, `SPES_GPU_MHZ=300`). The Mesa/EAGL

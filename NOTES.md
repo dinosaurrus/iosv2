@@ -1,3 +1,34 @@
+# 0169 Wi-Fi length checks; new boot images, 2026-11-15
+
+- Starting point: the delivered 2026-11-14 image already contained 0099/0103/0110/0113/0115
+  (strings "SPES WIFI: en0 and the station are up for iOS", "WLAN FIRMWARE READY",
+  "announcing MSA_READY as Topaz does"), so the user's "Wi-Fi olmadı" is not a missing-patch
+  problem. Root fix was already applied and verified.
+- Added patch 0169 (xnu/patches/0169-spes-wifi-glink-smem-bounds.patch) after auditing
+  SpesModem.cpp against HackiOS 79b00afb70 class: SMEM item size/padding arithmetic in 64 bits
+  and underflow-safe (h->size - h->pad_data, item walk bounded by payload); GLINK RX head/tail
+  validated against the FIFO, OPEN/INTENT/DATA and TX lengths summed in 64 bits, an RX message
+  that cannot fit the FIFO stops RX instead of wrapping to 0, RX assembly overflow checked;
+  QRTR option/packet payload lengths checked by subtraction. Patch verified with patch -p1 and
+  git apply against an exact reconstruction of post-0148 SpesModem.cpp.
+- Commit 16218bb ("Wi-Fi: check the modem's SMEM, GLINK and QRTR lengths (HackiOS 79b00afb70
+  class)"), pushed to origin/spes. CI run 43626029864 success (10m42s), artifact xnu-kernel.
+- Kernel xnu/out/kernel.development.sweet = dd51672acf9ff0e2a95c1ed42c817ce6caca9be9fec27611a9136fc2b2da7969
+  (previous 7b9f88a2... backed up at /tmp/opencode/kernel-7b9f.bak). ./rebuild.sh in
+  /home/dino/İndirilenler/IOS-spes regenerated and verify-boot-image.py PASSed:
+  boot-spes-hackios.img = boot-spes-hackios-wifi.img =
+  4437487233a2f886b72a5c73b499de90fb1bb20953639f9b896ff44b9ebbbd6f;
+  boot-spes-hackios-safe.img =
+  90f181075fb4a8c92bb170149a74d55a03c831795ce088a30f42bcccb9394ac5.
+  Cmdline unchanged: modem=1 wifi=1 wlan_mac=4a:4e:a7:fc:95:16.
+- Root unchanged: "Yeni Klasör/spes-ios-root-fixed.simg" (sparse c7e6d11a..., raw
+  67599870...), verify-simg.py PASS. Do not reflash it without new evidence.
+- No phone was attached (fastboot/adb empty), so the new kernel is not hardware-tested and no
+  new boot log exists. Next: `fastboot boot boot-spes-hackios.img`; if Wi-Fi still fails, boot
+  recovery/recovery.img and run tools/sweet-log-pull.sh /tmp/boot-log.txt, then inspect
+  "SPES WIFI", "WLAN FIRMWARE READY", apple80211 and glink lines. Booting the safe image
+  isolates the radio path.
+
 # all42 result + batch 9 in progress (TU_DEBUG sysmem), 2026-10-27
 
 - all42 (log research/spes-all42-boot.txt): "GPU PLL0 locked: VCO 1200000 kHz (l=62 alpha=0x8000), CX
