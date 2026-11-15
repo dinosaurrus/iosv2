@@ -1,0 +1,94 @@
+GPU: sleep times that cannot be nanoseconds, a buffer closed twice, a fence never issued (HackiOS 7822f30).
+
+Three faults in the RedwoodGPU service from values the caller chooses. A wait's seconds times
+NSEC_PER_SEC overflowed, so a huge timeout became a past one (or a negative one); it is worked out
+with __builtin_mul_overflow/__builtin_add_overflow now. freeBuffer() lets go of gGPULock while
+gpuWait() waits, so a second close of the same handle could free its memory and GPU address twice:
+the handle is emptied first and the work is done on a copy. And a wait for a fence that was never
+issued waited until gpuWait() declared the GPU dead for every client; such a fence is refused with
+kIOReturnBadArgument. The submission log no longer prints addresses[0]/words[0] when no command
+buffer was among the commands. HackiOS's show() size check does not apply: this port's show() is
+kIOReturnUnsupported (render tests read back).
+
+--- a/iokit/Kernel/arm/RedwoodGPU.cpp
++++ b/iokit/Kernel/arm/RedwoodGPU.cpp
+@@ -316,10 +316,17 @@
+ millisecondsUntil(const struct msm_timespec * when)
+ {
+ 	uint64_t now;
+-	int64_t left;
++	int64_t left, end;
+ 
+ 	absolutetime_to_nanoseconds(mach_continuous_time(), &now);
+-	left = when->seconds * (int64_t) NSEC_PER_SEC + when->nanoseconds - (int64_t) now;
++	/* the seconds are the caller's: a number too big to be nanoseconds is a time far ahead (or far behind), not a wrapped one */
++	if (__builtin_mul_overflow(when->seconds, (int64_t) NSEC_PER_SEC, &end) || __builtin_add_overflow(end, when->nanoseconds, &end)) {
++		return when->seconds > 0 && when->nanoseconds >= 0 ? GPU_PATIENCE_MS : 0;
++	}
++	if (end <= 0) {
++		return 0;                       /* (the clock's reading is never negative: this is past) */
++	}
++	left = end - (int64_t) now;
+ 	if (left <= 0) {
+ 		return 0;
+ 	}
+@@ -598,10 +605,22 @@
+  * written, and must not be somebody else's by then.
+  */
+ void
+-RedwoodGPUUserClient::freeBuffer(struct gpu_buffer * b)
++RedwoodGPUUserClient::freeBuffer(struct gpu_buffer * slot)
+ {
++	struct gpu_buffer saved = *slot;
++	struct gpu_buffer * b = &saved;
++	bool busy;
++
+ 	if (!redwood_gpu_ready()) return; /* Keep descriptors retained after a fault. */
+-	bool busy = redwood_gpu_ready() && b->fence != 0 && !redwood_gpu_done(b->fence);
++	/*
++	 * gpuWait() below lets go of the lock: take the buffer out of its handle first and work on a copy, so that
++	 * a second close of the same handle (or the client's closing) cannot free the same memory and address twice.
++	 */
++	slot->memory = NULL;
++	slot->surface = NULL;
++	fBufferCount--;
++	fBufferBytes -= b->size;
++	busy = redwood_gpu_ready() && b->fence != 0 && !redwood_gpu_done(b->fence);
+ 
+ 	if (busy && (fLeftCount == GPU_LEFT || b->host)) {
+ 		busy = !gpuWait(b->fence, 1000);        /* (nowhere to keep it, or the program's own pages: waited for) */
+@@ -646,10 +665,6 @@
+ 			b->surface->release();
+ 		}
+ 	}
+-	b->memory = NULL;
+-	b->surface = NULL;
+-	fBufferCount--;
+-	fBufferBytes -= b->size;
+ }
+ 
+ /* The buffers that were given back early and that the GPU is done with now: freed. With the lock held. */
+@@ -1253,8 +1268,9 @@
+ 	}
+ 	reap();
+ 	if (fSubmits++ < 4) {
++		/* (addresses and words are only set up to `count`: with no command buffer among the commands, the first would be stack garbage) */
+ 		IOLog("RedwoodGPU: submission %u: %u command buffers, the first at %#llx, %u words\n", request->fence, count,
+-		    addresses[0], words[0]);
++		    count != 0 ? addresses[0] : 0ull, count != 0 ? words[0] : 0u);
+ 	}
+ 	/* every five seconds in which something was submitted: how much, and what it cost here */
+ 	gGPUStat.submissions++;
+@@ -1412,6 +1428,12 @@
+ 	case kMsmWaitFence:
+ 		waitBegan = mach_absolute_time();
+ 		IOLockLock(gGPULock);
++		/* a fence that was never issued is never done: refuse it, so that waiting for it cannot make gpuWait() declare the GPU dead for every client */
++		if ((int32_t)(r.waitFence.fence - redwood_gpu_last()) > 0) {
++			IOLockUnlock(gGPULock);
++			ret = kIOReturnBadArgument;
++			break;
++		}
+ 		patience = millisecondsUntil(&r.waitFence.timeout);
+ 		if (!gpuWait(r.waitFence.fence, patience)) {
+ 			ret = kIOReturnTimeout;

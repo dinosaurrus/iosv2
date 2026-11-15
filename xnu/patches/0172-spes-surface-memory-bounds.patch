@@ -1,0 +1,44 @@
+Surfaces: a plane size worked out in 64 bits, and a directly shown surface checked against its memory (HackiOS 7822f30).
+
+Two numbers in a surface come from whoever makes it. A plane's default size is bytesPerRow times
+its rows; worked out in 32 bits that passes 4 GB and wraps to a smaller plane, so it is computed in
+64 bits and a result larger than a surface may be is refused. And directPresent() pointed the
+display pipe at a surface and cleaned its cache lines by stride times rows with only the 4 GB limit
+checked; the rows are now required to be inside the surface's own memory, or the frame takes the
+copying path, which already checks them.
+
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -531,8 +531,17 @@
+ 			p->bytesPerRow = sweet_dict_u32(pd, "IOSurfacePlaneBytesPerRow",
+ 			    sweet_row_bytes(p->width, p->elementWidth, p->bytesPerElement));
+ 			p->offset = sweet_dict_u32(pd, "IOSurfacePlaneOffset", (uint32_t)next);
+-			p->size = sweet_dict_u32(pd, "IOSurfacePlaneSize",
+-			    p->bytesPerRow * sweet_div_up(p->height, p->elementHeight));
++			uint32_t given = sweet_dict_u32(pd, "IOSurfacePlaneSize", 0);
++			uint64_t derived = (uint64_t)p->bytesPerRow * sweet_div_up(p->height, p->elementHeight);
++
++			if (given == 0) {
++				/* (in 64 bits: a stride of the caller's times the rows can pass 32) */
++				if (derived > SWEET_SURFACE_MAX_ALLOC) {
++					return kIOReturnNoMemory;
++				}
++				given = (uint32_t)derived;
++			}
++			p->size = given;
+ 			next = round_page((uint64_t)p->offset + p->size);
+ 			if ((uint64_t)p->offset + p->size > end) {
+ 				end = (uint64_t)p->offset + p->size;
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -1156,7 +1156,9 @@
+ 	uint64_t window = (uint64_t)s->offset + (uint64_t)fOffY * s->bytesPerRow + (uint64_t)fOffX * 4;
+ 	uint64_t pa = s->scanoutPhys + window;
+ 	uintptr_t va = s->kernelAddress();
+-	if (va == 0 || (pa & 0xf) != 0 || pa + (uint64_t)fHeight * s->bytesPerRow > (1ull << 32)) {
++	/* the rows named must be in the surface's memory, whatever stride it was made with (it is the caller's number) */
++	if (va == 0 || (pa & 0xf) != 0 || pa + (uint64_t)fHeight * s->bytesPerRow > (1ull << 32) ||
++	    s->memory == NULL || window + (uint64_t)fHeight * s->bytesPerRow > s->memory->getLength()) {
+ 		return false;
+ 	}
+ 	/* The MDP does not snoop CPU caches (CoreAnimation may have written some pixels itself). */

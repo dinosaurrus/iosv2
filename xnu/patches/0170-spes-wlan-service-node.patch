@@ -1,0 +1,144 @@
+WLAN: the Wi-Fi controller an IOEthernetController under the wlan node, its address there as local-mac-address (HackiOS 80f5042).
+
+MobileGestalt asks for the Wi-Fi address of every bundle lsd registers. It reads local-mac-address
+from the device tree's "wlan" node first, and otherwise waits up to 5 s per question for a service
+of the class IONetworkController under that node. With neither, a first boot that rebuilds
+LaunchServices in full takes hours, SpringBoard waiting (the ios-sapphire port found this first).
+Publish the controller as an IONetworkController -> IOEthernetController -> IO80211Controller --
+SystemConfiguration calls en0 Wi-Fi by that ancestry -- and put the address on the node. When the
+platform publishes the node as a nub (HackiOS) the controller goes under the node; on spes the node
+is under arm-io and the platform expert makes nubs for the top level only, so the address goes on
+the device tree entry itself (the property MobileGestalt reads first) and the controller stays
+under the platform.
+
+--- a/iokit/Kernel/arm/RedwoodWLAN.cpp
++++ b/iokit/Kernel/arm/RedwoodWLAN.cpp
+@@ -18,11 +18,27 @@
+  *     service can be the one the system routes through -- which wifid waits for after a join
+  *     ("failed to become routable interface") before Settings ticks the network.
+  *
+- * So: a controller of the class IO80211Controller under the platform, and below it one object
+- * that is both, an IONetworkInterface with wifid's properties. Both classes are ours, named as
+- * IO80211Family and IONetworkingFamily name theirs; neither has anything but properties.
++ *   - MobileGestalt, which lsd asks for the Wi-Fi address of every bundle it registers, looks the
++ *     address up as the property local-mac-address of the device tree's "wlan" node, as a phone
++ *     has it; without that it waits, up to 5 s every time, for a service of the class
++ *     IONetworkController under that node. With neither, each such question cost 5 s, and a
++ *     LaunchServices database rebuilt in full (a first boot on an empty data volume) takes hours,
++ *     SpringBoard waiting. (HackiOS hakios.wlan.cpp, commit 80f5042; the port is
++ *     github.com/oosexgang/hakios-xnu-kernel, APSL 2.0.)
++ *
++ * So: a controller of the class IO80211Controller -- an IOEthernetController and so an
++ * IONetworkController, as in IO80211Family -- under the "wlan" node (the platform when there is
++ * none), the radio's address on that node as local-mac-address, and below the controller one
++ * object that is both, an IONetworkInterface with wifid's properties. The classes are ours, named
++ * as IO80211Family and IONetworkingFamily name theirs; none has anything but properties.
++ *
++ * On spes the "wlan" node is under arm-io (tools/mkadt.py), and the platform expert publishes
++ * nubs for the top level only, so there is no service of that name to place the controller
++ * under. The node is still in the device tree, and the address is set there, which is the
++ * property MobileGestalt reads first; the controller then goes under the platform as before.
+  */
+ 
++#include <IOKit/IODeviceTreeSupport.h>
+ #include <IOKit/IOLib.h>
+ #include <IOKit/IOPlatformExpert.h>
+ #include <IOKit/IOService.h>
+@@ -32,12 +48,26 @@
+ 
+ extern "C" void RedwoodWLANStart(const char * interface, const uint8_t * address);
+ 
+-class IO80211Controller : public IOService
++class IONetworkController : public IOService
++{
++	OSDeclareDefaultStructors(IONetworkController);
++};
++
++OSDefineMetaClassAndStructors(IONetworkController, IOService);
++
++class IOEthernetController : public IONetworkController
++{
++	OSDeclareDefaultStructors(IOEthernetController);
++};
++
++OSDefineMetaClassAndStructors(IOEthernetController, IONetworkController);
++
++class IO80211Controller : public IOEthernetController
+ {
+ 	OSDeclareDefaultStructors(IO80211Controller);
+ };
+ 
+-OSDefineMetaClassAndStructors(IO80211Controller, IOService);
++OSDefineMetaClassAndStructors(IO80211Controller, IOEthernetController);
+ 
+ class IONetworkInterface : public IOService
+ {
+@@ -87,28 +117,67 @@
+ 	return service;
+ }
+ 
++/*
++ * The device tree's "wlan" node. A platform that publishes nodes as nubs (HackiOS) has a
++ * service of that name; spes does not, and the node itself is looked up in the device tree.
++ * Retained.
++ */
++static IORegistryEntry *
++wlanNode(void)
++{
++	OSDictionary * match = IOService::nameMatching("wlan");
++	IOService * service = match != NULL ? IOService::copyMatchingService(match) : NULL;
++	OSIterator * found;
++	IORegistryEntry * node = NULL;
++
++	OSSafeReleaseNULL(match);
++	if (service != NULL) {
++		return service;
++	}
++	found = IODTFindMatchingEntries(IORegistryEntry::getRegistryRoot(), kIODTRecursive, "('wlan')");
++	if (found != NULL) {
++		node = (IORegistryEntry *) found->getNextObject();
++		if (node != NULL) {
++			node->retain();         /* (the iterator's set lets go of it) */
++		}
++		found->release();
++	}
++	return node;
++}
++
+ /* Once, when the interface of a radio exists. */
+ void
+ RedwoodWLANStart(const char * interface, const uint8_t * address)
+ {
+ 	IOService * platform = IOService::getPlatform();
++	IORegistryEntry * node = wlanNode();
++	IOService * provider = OSDynamicCast(IOService, node);
+ 	IO80211Controller * controller = OSTypeAlloc(IO80211Controller);
+ 	RedwoodWLAN * wlan = OSTypeAlloc(RedwoodWLAN);
+ 	OSData * mac;
+ 	OSNumber * number;
+ 
++	if (provider == NULL) {
++		provider = platform;            /* (spes: the node is under arm-io and no nub was made) */
++	}
+ 	if (platform == NULL || controller == NULL || wlan == NULL || !controller->init() || !wlan->init()) {
+ 		OSSafeReleaseNULL(controller);
+ 		OSSafeReleaseNULL(wlan);
++		OSSafeReleaseNULL(node);
+ 		IOLog("RedwoodWLAN: cannot create the services\n");
+ 		return;
+ 	}
+ 	if ((mac = OSData::withBytes(address, 6)) != NULL) {
+ 		controller->setProperty("IOMACAddress", mac);
++		if (node != NULL) {
++			node->setProperty("local-mac-address", mac);     /* where MobileGestalt reads it first */
++		}
+ 		mac->release();
+ 	}
+ 	controller->setProperty("IOBuiltin", true);
+-	if ((controller = (IO80211Controller *) publish(controller, platform, "RedwoodWLANController")) == NULL) {
++	controller = (IO80211Controller *) publish(controller, provider, "RedwoodWLANController");
++	OSSafeReleaseNULL(node);
++	if (controller == NULL) {
+ 		wlan->release();
+ 		IOLog("RedwoodWLAN: the controller did not start\n");
+ 		return;
