@@ -11,7 +11,7 @@ diagnostic choices and leaving the higher clocks opt-in.
 
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
-@@ -1327,7 +1327,7 @@
+@@ -1327,3 +1327,3 @@
  	 */
 -	uint32_t gpu_mhz = 19, gfx_cfg = 0;
 +	uint32_t gpu_mhz = 785, gfx_cfg = 0;
