@@ -3,24 +3,22 @@ Wi-Fi: start the Spes modem/WLFW path from the platform expert.
 The existing call is in AppleCLCD::start(), which makes Wi-Fi startup depend on
 the display provider being matched and started first.  On this port the modem
 thread already waits for UFS and has its own one-shot guard, so starting it when
-the Spes platform expert registers is both earlier and independent of display
-bring-up.  The old call remains as a harmless fallback for boot paths that
-instantiate the framebuffer before the platform callback.
+the Spes platform expert registers is earlier and independent of display bring-up.
+The old call remains as a harmless fallback for boot paths that instantiate the
+framebuffer before the platform callback.
 
 --- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
 +++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
-@@ -9,6 +9,8 @@
+@@ -9,4 +9,6 @@
  #include <IOKit/IODeviceTreeSupport.h>
  #include <IOKit/IOLib.h>
  
 +extern "C" void spes_modem_init(void);
 +
  class SweetPlatformExpert : public IODTPlatformExpert {
- 	OSDeclareDefaultStructors(SweetPlatformExpert);
-@@ -34,6 +36,7 @@
- 	}
+@@ -37,4 +39,5 @@
  	registerService();
- 	IOLog("SWEET: platform expert registered\\n");
+ 	IOLog("SWEET: platform expert registered\n");
 +	spes_modem_init();
  	return true;
  }
